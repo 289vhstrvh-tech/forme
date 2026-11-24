@@ -166,7 +166,9 @@ function renderToday() {
   </section>
 
   <section class="card glass">
-    <h2>Repas <button class="pill primary small" data-act="add-food" data-meal="${defaultMeal()}">+ Ajouter</button></h2>
+    <h2>Repas <span class="row" style="gap:8px">
+      <button class="pill small" data-act="scan" data-meal="${defaultMeal()}" aria-label="Scanner un code-barres"><svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3M8 9v6M11 9v6M14 9v6M17 9v6"/></svg> Scanner</button>
+      <button class="pill primary small" data-act="add-food" data-meal="${defaultMeal()}">+ Ajouter</button></span></h2>
     ${MEALS.map(([id, label]) => {
       const items = day.items.filter((i) => i.meal === id); const k = sumItems(items).kcal || 0;
       return `<div class="meal-head"><span>${label}</span><span class="row" style="gap:8px"><span class="muted num">${r0(k)} kcal</span>
@@ -450,8 +452,8 @@ async function foodSheet(meal, editItem) {
     <div class="seg" role="group" style="margin-bottom:12px">${MEALS.map(([id, l]) => `<button data-meal="${id}" aria-pressed="${id === meal}">${l.replace('Petit-déjeuner', 'P.-déj.')}</button>`).join('')}</div>
     <input class="input" type="search" placeholder="Rechercher (ex. saumon, skyr, lentilles)" data-q autofocus autocomplete="off">
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="pill small primary" data-f="scan">Scanner</button>
       <button class="pill small" data-f="off">Produits de marque</button>
-      <button class="pill small" data-f="barcode">Code-barres</button>
       <button class="pill small" data-f="custom">Créer un aliment</button>
     </div>
     <ul class="list results" data-res></ul>`);
@@ -492,33 +494,151 @@ async function foodSheet(meal, editItem) {
         res.innerHTML = refs.length ? refs.map((r) => item(r, 'OFF')).join('') : '<li class="empty">Aucun produit trouvé.</li>';
       } catch { res.innerHTML = '<li class="empty">Pas de connexion internet.</li>'; }
     }
-    if (f === 'barcode') {
-      const code = prompt('Numéro du code-barres (sous les barres) :'); if (!code) return;
-      try {
-        const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code.trim())}.json?fields=code,product_name,brands,nutriments`);
-        const ref = offToRef((await r.json()).product);
-        ref ? amountSheet(ref, meal) : toast('Produit inconnu : crée-le à la main');
-      } catch { toast('Pas de connexion internet'); }
-    }
+    if (f === 'scan') scannerSheet(meal);
   });
 }
+
+// Open Food Facts product -> food ref (values per 100 g, converted to the app's units)
+const OFF_FIELDS = 'code,product_name,product_name_fr,brands,quantity,serving_quantity,nutriments';
 function offToRef(p) {
-  if (!p?.nutriments || p.nutriments['energy-kcal_100g'] == null) return null;
-  const n = p.nutriments; const g = (k) => (n[k + '_100g'] != null ? Number(n[k + '_100g']) : undefined);
-  const per100 = { kcal: g('energy-kcal'), prot: g('proteins'), carb: g('carbohydrates'), sugar: g('sugars'), fiber: g('fiber'),
-    fat: g('fat'), sat: g('saturated-fat'), na: g('sodium') != null ? g('sodium') * 1000 : undefined,
-    ca: g('calcium') != null ? g('calcium') * 1000 : undefined, fe: g('iron') != null ? g('iron') * 1000 : undefined,
-    b12: g('vitamin-b12') != null ? g('vitamin-b12') * 1e6 : undefined, vitD: g('vitamin-d') != null ? g('vitamin-d') * 1e6 : undefined };
-  Object.keys(per100).forEach((k) => per100[k] === undefined && delete per100[k]);
-  return { src: 'x', id: 'off' + p.code, name: [p.product_name, p.brands?.split(',')[0]].filter(Boolean).join(' · ') || 'Produit', per100 };
+  const n = p?.nutriments; if (!n) return null;
+  let kcal = n['energy-kcal_100g'];
+  if (kcal == null && n['energy_100g'] != null) kcal = n['energy_100g'] / 4.184; // kJ -> kcal
+  if (kcal == null) return null;
+  const g = (k, mult = 1) => (n[k + '_100g'] != null && n[k + '_100g'] !== '' ? Number(n[k + '_100g']) * mult : undefined);
+  const MG = 1e3, UG = 1e6; // OFF stores minerals and vitamins in grams
+  const per100 = {
+    kcal: Number(kcal), prot: g('proteins'), carb: g('carbohydrates'), sugar: g('sugars'), fiber: g('fiber'),
+    fat: g('fat'), sat: g('saturated-fat'), mono: g('monounsaturated-fat'), poly: g('polyunsaturated-fat'),
+    ala: g('alpha-linolenic-acid'), epa: g('eicosapentaenoic-acid'), dha: g('docosahexaenoic-acid'),
+    na: g('sodium', MG), k: g('potassium', MG), ca: g('calcium', MG), mg: g('magnesium', MG), p: g('phosphorus', MG),
+    fe: g('iron', MG), zn: g('zinc', MG), cu: g('copper', MG), se: g('selenium', UG), i: g('iodine', UG),
+    vitA: g('vitamin-a', UG), vitD: g('vitamin-d', UG), vitE: g('vitamin-e', MG), vitK: g('vitamin-k', UG), vitC: g('vitamin-c', MG),
+    b1: g('vitamin-b1', MG), b2: g('vitamin-b2', MG), b3: g('vitamin-pp', MG), b5: g('pantothenic-acid', MG),
+    b6: g('vitamin-b6', MG), b9: g('vitamin-b9', UG) ?? g('folates', UG), b12: g('vitamin-b12', UG),
+  };
+  Object.keys(per100).forEach((k) => (per100[k] === undefined || !Number.isFinite(per100[k])) && delete per100[k]);
+  const name = [p.product_name_fr || p.product_name, p.brands?.split(',')[0]?.trim()].filter(Boolean).join(' · ') || 'Produit';
+  const serving = Number(p.serving_quantity) > 0 ? Math.round(Number(p.serving_quantity)) : undefined;
+  return { src: 'x', id: 'off' + p.code, name, per100, serving, barcode: p.code };
+}
+async function lookupBarcode(code) {
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('network');
+  const j = await r.json();
+  return j.status === 1 || j.product ? offToRef(j.product) : null;
+}
+
+/* ---------------------------------------------------------------- barcode scanner */
+let camStream = null, scanTimer = null;
+let zxingReady = null;
+const loadZXing = () => (zxingReady ||= new Promise((resolve, reject) => {
+  const s = document.createElement('script'); s.src = 'vendor/zxing-reader.js';
+  s.onload = () => {
+    ZXingWASM.prepareZXingModule({
+      overrides: { locateFile: (path, prefix) => (path.endsWith('.wasm') ? new URL('vendor/' + path, location.href).href : prefix + path) },
+      fireImmediately: true,
+    });
+    resolve(ZXingWASM);
+  };
+  s.onerror = () => { zxingReady = null; reject(new Error('load')); };
+  document.head.append(s);
+}));
+function stopCamera() {
+  clearTimeout(scanTimer); scanTimer = null;
+  camStream?.getTracks().forEach((t) => t.stop()); camStream = null;
+}
+// Product codes are EAN/UPC; a QR code is accepted when it contains such a number (GS1 Digital Link or plain digits)
+const codeFromText = (t) => { const m = String(t).match(/(?:\/01\/|^)0*(\d{8,14})(?:\D|$)/) || String(t).match(/\b(\d{8,14})\b/); return m ? m[1] : null; };
+
+async function scannerSheet(meal) {
+  const sheet = openSheet(`
+    <h2>Scanner un produit</h2>
+    <div class="scanner"><video playsinline muted autoplay></video><div class="frame" aria-hidden="true"></div>
+      <div class="scan-msg" data-msg>Ouverture de la caméra…</div></div>
+    <p class="muted" style="font-size:14px;margin:12px 4px">Vise le code-barres du paquet : l'aliment s'ajoute tout seul avec ses valeurs nutritionnelles.</p>
+    <div class="row" style="gap:8px">
+      <input class="input num grow" inputmode="numeric" placeholder="Ou tape le numéro" data-manual>
+      <button class="pill" data-a="manual">OK</button>
+    </div>
+    <div class="actions"><button class="pill" data-a="cancel">Annuler</button></div>`);
+  const video = $('video', sheet), msg = $('[data-msg]', sheet);
+  let busy = false;
+
+  const found = async (code) => {
+    if (busy) return; busy = true; stopCamera();
+    msg.textContent = `Code ${code} : recherche du produit…`;
+    try {
+      const ref = await lookupBarcode(code);
+      if (ref) {
+        if (!db.customFoods.some((f) => f.id === ref.id)) { db.customFoods.push({ id: ref.id, name: ref.name, per100: ref.per100, serving: ref.serving, barcode: code }); save(); }
+        amountSheet(ref, meal);
+      } else {
+        toast('Produit absent d’Open Food Facts : crée-le à partir de l’étiquette');
+        customFoodSheet(meal, `Produit ${code}`);
+      }
+    } catch { msg.textContent = 'Pas de connexion internet. Réessaie plus tard.'; busy = false; }
+  };
+
+  sheet.addEventListener('click', (ev) => {
+    const a = ev.target.closest('[data-a]')?.dataset.a;
+    if (a === 'cancel') closeSheet();
+    if (a === 'manual') { const c = codeFromText($('[data-manual]', sheet).value.replace(/\s/g, '')); c ? found(c) : toast('Numéro invalide (8 à 14 chiffres)'); }
+  });
+
+  // Already scanned once? use the saved product without network
+  const offline = (code) => db.customFoods.find((f) => f.barcode === code);
+
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch {
+    msg.textContent = 'Caméra refusée. Autorise-la dans Réglages → Safari → Caméra, ou tape le numéro.'; return;
+  }
+  if (!document.body.contains(sheet)) return stopCamera();
+  video.srcObject = camStream; await video.play().catch(() => {});
+  msg.textContent = 'Vise le code-barres';
+
+  const native = 'BarcodeDetector' in window ? new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'qr_code'] }) : null;
+  let zx = null;
+  if (!native) { try { zx = await loadZXing(); } catch { msg.textContent = 'Lecteur indisponible : tape le numéro.'; return; } }
+  const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const tick = async () => {
+    if (!camStream || busy) return;
+    try {
+      if (video.videoWidth) {
+        let text = null;
+        if (native) {
+          text = (await native.detect(video))[0]?.rawValue;
+        } else {
+          // centre band of the frame, where the guide is drawn
+          const vw = video.videoWidth, vh = video.videoHeight, cw = Math.round(vw * 0.9), ch = Math.round(vh * 0.6);
+          canvas.width = cw; canvas.height = ch;
+          ctx.drawImage(video, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, cw, ch);
+          const res = await zx.readBarcodes(ctx.getImageData(0, 0, cw, ch), { formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'QRCode'], tryHarder: true, maxNumberOfSymbols: 1 });
+          text = res.find((r) => r.isValid)?.text;
+        }
+        const code = text && codeFromText(text);
+        if (code) {
+          const saved = offline(code);
+          if (saved) { busy = true; stopCamera(); return amountSheet({ src: 'x', id: saved.id, name: saved.name, per100: saved.per100, serving: saved.serving }, meal); }
+          return found(code);
+        }
+        if (text) msg.textContent = 'QR code sans code produit : vise le code-barres';
+      }
+    } catch { /* frame not ready */ }
+    scanTimer = setTimeout(tick, 120);
+  };
+  tick();
 }
 
 function amountSheet(ref, meal, editItem) {
   const p = per100Of(ref);
   const sheet = openSheet(`
     <h2>${esc(nameOf(ref))}</h2>
-    <label class="field"><span>Quantité (g ou ml)</span><input class="input num" inputmode="decimal" data-g value="${editItem ? editItem.g : 100}" autofocus></label>
-    <div class="row" style="gap:8px;flex-wrap:wrap">${[30, 50, 100, 150, 200, 250].map((g) => `<button class="pill small" data-quick="${g}">${g} g</button>`).join('')}</div>
+    <label class="field"><span>Quantité (g ou ml)</span><input class="input num" inputmode="decimal" data-g value="${editItem ? editItem.g : ref.serving || 100}" autofocus></label>
+    <div class="row" style="gap:8px;flex-wrap:wrap">${ref.serving ? `<button class="pill small primary" data-quick="${ref.serving}">1 portion (${ref.serving} g)</button>` : ''}${[30, 50, 100, 150, 200, 250].map((g) => `<button class="pill small" data-quick="${g}">${g} g</button>`).join('')}</div>
     <dl class="kv num" style="margin-top:16px" data-preview></dl>
     <div class="actions">
       ${editItem ? '<button class="pill danger" data-a="del">Supprimer</button>' : '<button class="pill" data-a="cancel">Annuler</button>'}
@@ -610,7 +730,7 @@ function openSheet(html) {
   setTimeout(() => wrap.querySelector('[autofocus]')?.focus(), 250);
   return wrap.firstElementChild;
 }
-function closeSheet() { $('#sheet-root').innerHTML = ''; document.body.style.overflow = ''; }
+function closeSheet() { stopCamera(); $('#sheet-root').innerHTML = ''; document.body.style.overflow = ''; }
 
 /* ---------------------------------------------------------------- events */
 document.querySelector('.tabbar').addEventListener('click', (e) => {
@@ -620,6 +740,7 @@ view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return; const a = el.dataset.act;
   if (a === 'day') { state.day = addDays(state.day, +el.dataset.n); if (state.day > dayKey()) state.day = dayKey(); render(); }
   if (a === 'add-food') foodSheet(el.dataset.meal);
+  if (a === 'scan') foodsReady.then(() => scannerSheet(el.dataset.meal));
   if (a === 'edit-item') { const it = getDay(state.day).items.find((i) => i.id === el.dataset.id); foodSheet(it.meal, it); }
   if (a === 'micro-all') { state.microAll = !state.microAll; render(); }
   if (a === 'new-workout') workoutSheet();

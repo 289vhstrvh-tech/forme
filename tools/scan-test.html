@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- Decoder self-test: draws an EAN-13 barcode on a canvas and reads it back with the vendored zxing-wasm.
+     Copy into docs/ temporarily and open /scan-test.html -->
+<body style="margin:0;background:#fff;font:20px sans-serif">
+<canvas id="c" width="640" height="300"></canvas>
+<pre id="out">…</pre>
+<script src="vendor/zxing-reader.js"></script>
+<script>
+const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+const G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+const R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+const PAR = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+function ean13(code) {
+  const d = code.split('').map(Number); let bits = '101';
+  for (let i = 1; i <= 6; i++) bits += (PAR[d[0]][i - 1] === 'L' ? L : G)[d[i]];
+  bits += '01010';
+  for (let i = 7; i <= 12; i++) bits += R[d[i]];
+  return bits + '101';
+}
+const code = '3017620422003';
+const c = document.getElementById('c'), x = c.getContext('2d');
+x.fillStyle = '#fff'; x.fillRect(0, 0, 640, 300); x.fillStyle = '#000';
+ean13(code).split('').forEach((b, i) => { if (b === '1') x.fillRect(60 + i * 5, 40, 5, 200); });
+ZXingWASM.prepareZXingModule({ overrides: { locateFile: (p, pre) => (p.endsWith('.wasm') ? new URL('vendor/' + p, location.href).href : pre + p) }, fireImmediately: true });
+ZXingWASM.readBarcodes(x.getImageData(0, 0, 640, 300), { formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'QRCode'], tryHarder: true, maxNumberOfSymbols: 1 })
+  .then((r) => { document.getElementById('out').textContent = 'RESULT: ' + JSON.stringify(r.map((y) => [y.format, y.text, y.isValid])) + (r[0]?.text === code ? '  PASS' : '  FAIL'); })
+  .catch((e) => { document.getElementById('out').textContent = 'ERROR: ' + e; });
+</script>
+</body>

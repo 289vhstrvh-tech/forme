@@ -20,6 +20,7 @@ f.onload = () => setTimeout(() => {
   const d = f.contentDocument;
   if (act === 'food') { d.querySelector('[data-act=add-food]').click(); setTimeout(() => { const q = d.querySelector('[data-q]'); q.value = 'saumon'; q.dispatchEvent(new Event('input')); }, 400); }
   if (act === 'amount') { d.querySelector('[data-act=add-food]').click(); setTimeout(() => { const q = d.querySelector('[data-q]'); q.value = 'lentille verte'; q.dispatchEvent(new Event('input')); setTimeout(() => d.querySelector('li[data-ref]').click(), 200); }, 400); }
+  if (act === 'scan') { f.contentWindow.scrollTo(0, 500); d.querySelector('[data-act=scan]').click(); }
   if (act === 'workout') d.querySelector('[data-act=new-workout]').click(), setTimeout(() => d.querySelector('[data-w=tpl]')?.click(), 300);
 }, 1200);
 </script>
