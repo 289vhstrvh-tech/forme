@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Test harness: seeds sample data, then shows the app in a 390px iPhone-sized frame.
+     Copy into docs/ temporarily and open /seed-test.html?tab=progress -->
+<body style="margin:0;background:#000">
+<script>
+const key = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+const days = {};
+const sample = [[9313, 250, 'pdj'], [26038, 150, 'dej'], [20587, 200, 'dej'], [19860, 170, 'col'], [9104, 200, 'din'], [20904, 150, 'din']];
+for (let i = -13; i <= 0; i++) days[key(i)] = { items: sample.slice(0, 3 + ((i + 13) % 4)).map(([code, g, meal], j) => ({ id: i + '-' + j, meal, g: g + (i % 3) * 20, food: { src: 'c', code } })), health: i === 0 ? { active: 540, steps: 9120 } : {}, sent: {} };
+const workouts = [];
+for (let w = 0; w < 6; w++) workouts.push({ id: 'w' + w, date: key(-12 + w * 2), name: w % 2 ? 'Pull' : 'Push', exercises: w % 2
+  ? [{ name: 'Tractions', sets: [{ reps: 8, kg: 0 + w }, { reps: 7, kg: w }] }, { name: 'Rowing barre', sets: [{ reps: 10, kg: 60 + w * 2 }, { reps: 8, kg: 65 + w * 2 }] }]
+  : [{ name: 'Développé couché', sets: [{ reps: 8, kg: 70 + w * 2.5 }, { reps: 6, kg: 75 + w * 2.5 }, { reps: 6, kg: 75 + w * 2.5 }] }, { name: 'Dips', sets: [{ reps: 12, kg: 0 }] }] });
+const weights = [-13, -10, -7, -4, -1, 0].map((n, i) => ({ date: key(n), kg: 76.8 - i * 0.25 + (i % 2) * 0.15 }));
+localStorage.setItem('forme.v1', JSON.stringify({ profile: { sex: 'h', age: 29, height: 180, weight: 76, activity: 1.55, goal: 'masse', protPerKg: 2, fatPct: 27, adaptive: false }, days, customFoods: [], recent: [], favorites: [], workouts, exercises: [], weights }));
+const f = document.createElement('iframe'); f.style.cssText = 'width:390px;height:844px;border:0;display:block';
+f.src = 'index.html' + location.search; document.body.append(f);
+const act = new URLSearchParams(location.search).get('act');
+f.onload = () => setTimeout(() => {
+  const d = f.contentDocument;
+  if (act === 'food') { d.querySelector('[data-act=add-food]').click(); setTimeout(() => { const q = d.querySelector('[data-q]'); q.value = 'saumon'; q.dispatchEvent(new Event('input')); }, 400); }
+  if (act === 'amount') { d.querySelector('[data-act=add-food]').click(); setTimeout(() => { const q = d.querySelector('[data-q]'); q.value = 'lentille verte'; q.dispatchEvent(new Event('input')); setTimeout(() => d.querySelector('li[data-ref]').click(), 200); }, 400); }
+  if (act === 'workout') d.querySelector('[data-act=new-workout]').click(), setTimeout(() => d.querySelector('[data-w=tpl]')?.click(), 300);
+}, 1200);
+</script>
+</body>
